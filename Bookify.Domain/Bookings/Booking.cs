@@ -34,20 +34,48 @@ public sealed class Booking : Entity {
     public Money TotalPrice { get; private set; }
     public BookingStatus Status { get; private set; }
     public DateTime CreatedOnUtc { get; private set; }
-    public DateTime? ConfirmedOnUtc { get; }
+    public DateTime? ConfirmedOnUtc { get; internal set; }
     public DateTime? RejectedOnUtc { get; }
     public DateTime? CompletedOnUtc { get; }
     public DateTime? CancelledOnUtc { get; }
 
     public static Booking Reserve(
-        Guid apartmentId,
+        Apartment apartment,
         Guid userId,
         DateRange duration,
-        DateTime utcNow) {
+        DateTime utcNow,
+        PricingService pricingService) {
+        var pricingDetails = pricingService.CalculatePrice(apartment, duration);
+
         var booking = new Booking(
             Guid.NewGuid(),
-            apartmentId,
+            apartment.Id,
             userId,
-            duration);
+            duration,
+            pricingDetails.PriceForPeriod,
+            pricingDetails.CleaningFee,
+            pricingDetails.AmenitiesUpCharge,
+            pricingDetails.TotalPrice,
+            BookingStatus.Reserved,
+            utcNow);
+
+        booking.RaiseDomainEvent(new BookingReservedDomainEvent(booking.Id));
+
+        apartment.LastBookedOnUtc = utcNow;
+
+        return booking;
+    }
+
+    public Result Confirm(DateTime utcNow) {
+        if (Status != BookingStatus.Reserved) {
+            return Result.Failure(BookingErrors.NotPending);
+        }
+
+        Status = BookingStatus.Confirmed;
+        ConfirmedOnUtc = utcNow;
+
+        RaiseDomainEvent(new BookingConfirmedDomainEvent(Id));
+
+        return Result.Success();
     }
 }
